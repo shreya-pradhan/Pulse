@@ -343,7 +343,11 @@ function AddCompetitorModal({
   const toggleUrl = (url: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(url) ? next.delete(url) : next.add(url);
+      if (next.has(url)) {
+        next.delete(url);
+      } else {
+        next.add(url);
+      }
       return next;
     });
   };
