@@ -4,6 +4,8 @@ import { saveSnapshotForUrl } from "@/lib/snapshots";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 
+export const maxDuration = 60;
+
 function isCronRequest(request: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get("authorization");

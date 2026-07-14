@@ -51,6 +51,20 @@ function getBaseUrl(request: NextRequest): string {
   return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 }
 
+function extractErrorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== "object") return fallback;
+
+  const { error } = body as { error?: unknown };
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const { message } = error as { message?: unknown };
+    if (typeof message === "string") return message;
+    return JSON.stringify(error);
+  }
+
+  return fallback;
+}
+
 async function callScrapeApi(
   baseUrl: string,
   cronSecret: string,
@@ -67,8 +81,10 @@ async function callScrapeApi(
   });
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error ?? `Scrape API failed (${response.status})`);
+    const body = await response.json().catch(() => null);
+    throw new Error(
+      extractErrorMessage(body, `Scrape API failed (${response.status})`)
+    );
   }
 
   return response.json();
@@ -86,8 +102,10 @@ async function callDiffApi(
   });
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error ?? `Diff API failed (${response.status})`);
+    const body = await response.json().catch(() => null);
+    throw new Error(
+      extractErrorMessage(body, `Diff API failed (${response.status})`)
+    );
   }
 
   return response.json();
