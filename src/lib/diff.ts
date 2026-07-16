@@ -28,7 +28,7 @@ export async function summarizeDiff(diff: string): Promise<string> {
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
+  const model = genAI.getGenerativeModel({ model: "gemini-flash-lite-latest" });
 
   const result = await model.generateContent(`${PROMPT}\n\n${diff}`);
   const summary = result.response.text().trim();

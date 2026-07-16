@@ -24,6 +24,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    console.error(
+      "[diff] Failed to compute diff summary:",
+      error instanceof Error ? error.message : error
+    );
     return NextResponse.json(
       { error: "Failed to compute diff summary" },
       { status: 500 }
