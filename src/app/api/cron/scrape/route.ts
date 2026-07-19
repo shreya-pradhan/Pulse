@@ -38,14 +38,18 @@ type ScrapeResponse = {
 };
 
 function getBaseUrl(request: NextRequest): string {
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
-  }
-
+  // Prefer the incoming request's Host header over VERCEL_URL: VERCEL_URL
+  // points at the current deployment's unique hash URL, which has Vercel's
+  // deployment protection enabled and blocks this internal self-call. The
+  // Host header reflects the stable custom domain pg_cron actually calls.
   const host = request.headers.get("host");
   if (host) {
     const protocol = host.startsWith("localhost") ? "http" : "https";
     return `${protocol}://${host}`;
+  }
+
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL}`;
   }
 
   return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
