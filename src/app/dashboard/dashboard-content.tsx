@@ -632,16 +632,29 @@ function TrackedUrlCardItem({
   card,
   displayTimezone,
   onDelete,
+  onUpdate,
   onRunComplete,
 }: {
   card: TrackedUrlCard;
   displayTimezone: string;
   onDelete: (id: string) => void;
+  onUpdate: (updated: TrackedUrlCard) => void;
   onRunComplete: () => void;
 }) {
   const [isDeleting, startDeleteTransition] = useTransition();
   const [isRunning, setIsRunning] = useState(false);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [editUrl, setEditUrl] = useState(card.url);
+  const [editSchedule, setEditSchedule] = useState<ScheduleState>({
+    scheduleType: card.scheduleType,
+    scheduleTime: card.scheduleTime,
+    scheduleDay: card.scheduleDay ?? 1,
+    timezone: card.timezone,
+  });
+  const [editError, setEditError] = useState<string | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const handleDelete = () => {
     if (!confirm(`Stop tracking "${card.label ?? card.url}"?`)) return;
@@ -649,6 +662,62 @@ function TrackedUrlCardItem({
       await deleteTrackedUrl(card.id);
       onDelete(card.id);
     });
+  };
+
+  const openEdit = () => {
+    setEditUrl(card.url);
+    setEditSchedule({
+      scheduleType: card.scheduleType,
+      scheduleTime: card.scheduleTime,
+      scheduleDay: card.scheduleDay ?? 1,
+      timezone: card.timezone,
+    });
+    setEditError(null);
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = async () => {
+    setEditError(null);
+
+    try {
+      new URL(editUrl);
+    } catch {
+      setEditError("Please enter a valid URL");
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const res = await fetch("/api/urls", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: card.id,
+          url: editUrl,
+          schedule_type: editSchedule.scheduleType,
+          schedule_time: editSchedule.scheduleTime,
+          schedule_day: editSchedule.scheduleType === "weekly" ? editSchedule.scheduleDay : null,
+          timezone: editSchedule.timezone,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save changes");
+
+      onUpdate({
+        ...card,
+        url: data.url as string,
+        scheduleType: data.schedule_type as ScheduleType,
+        scheduleTime: String(data.schedule_time).slice(0, 5),
+        scheduleDay: (data.schedule_day as number | null) ?? null,
+        timezone: data.timezone as string,
+        nextRunAt: (data.next_run_at as string | null) ?? null,
+      });
+      setIsEditing(false);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to save changes");
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   const handleRunNow = async () => {
@@ -713,7 +782,7 @@ function TrackedUrlCardItem({
         <div className="flex shrink-0 gap-1.5">
           <button
             onClick={handleRunNow}
-            disabled={isRunning || isDeleting}
+            disabled={isRunning || isDeleting || isEditing}
             className="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-50"
           >
             {isRunning ? (
@@ -729,8 +798,18 @@ function TrackedUrlCardItem({
             {isRunning ? "Running…" : "Run"}
           </button>
           <button
+            onClick={isEditing ? () => setIsEditing(false) : openEdit}
+            disabled={isRunning || isDeleting}
+            className="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-50"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+            </svg>
+            {isEditing ? "Cancel" : "Edit"}
+          </button>
+          <button
             onClick={handleDelete}
-            disabled={isDeleting || isRunning}
+            disabled={isDeleting || isRunning || isEditing}
             className="rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
           >
             {isDeleting ? "…" : "Delete"}
@@ -738,27 +817,66 @@ function TrackedUrlCardItem({
         </div>
       </div>
 
-      <div className="mt-3 flex items-center gap-1.5">
-        <svg className="h-3.5 w-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        <span className="text-xs text-zinc-500">{scheduleLabel} · {card.timezone}</span>
-      </div>
+      {isEditing ? (
+        <div className="mt-4 space-y-3 rounded-xl border border-zinc-200 bg-zinc-50/60 p-4">
+          <FormField label="URL">
+            <input
+              type="text"
+              value={editUrl}
+              onChange={(e) => setEditUrl(e.target.value)}
+              className={inputCls}
+            />
+          </FormField>
+          <SchedulePicker value={editSchedule} onChange={setEditSchedule} />
 
-      <div className="mt-4 grid grid-cols-3 divide-x divide-zinc-100 rounded-lg border border-zinc-100 bg-zinc-50">
-        {[
-          { label: "Last checked", value: formatDate(card.lastChecked, displayTimezone) },
-          { label: "Last change",  value: formatDate(card.lastChange,  displayTimezone) },
-          { label: "Next run",     value: formatDate(card.nextRunAt,   displayTimezone) },
-        ].map((stat) => (
-          <div key={stat.label} className="px-3 py-2.5">
-            <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">{stat.label}</p>
-            <p className="mt-0.5 text-xs font-medium leading-snug text-zinc-700">{stat.value}</p>
+          {editError && (
+            <p className="text-xs text-red-600">{editError}</p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setIsEditing(false)}
+              disabled={isSavingEdit}
+              className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-white disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveEdit}
+              disabled={isSavingEdit}
+              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
+            >
+              {isSavingEdit ? "Saving…" : "Save changes"}
+            </button>
           </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-3 flex items-center gap-1.5">
+            <svg className="h-3.5 w-3.5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-xs text-zinc-500">{scheduleLabel} · {card.timezone}</span>
+          </div>
 
-      {runResult && <RunResultPanel result={runResult} />}
+          <div className="mt-4 grid grid-cols-3 divide-x divide-zinc-100 rounded-lg border border-zinc-100 bg-zinc-50">
+            {[
+              { label: "Last checked", value: formatDate(card.lastChecked, displayTimezone) },
+              { label: "Last change",  value: formatDate(card.lastChange,  displayTimezone) },
+              { label: "Next run",     value: formatDate(card.nextRunAt,   displayTimezone) },
+            ].map((stat) => (
+              <div key={stat.label} className="px-3 py-2.5">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">{stat.label}</p>
+                <p className="mt-0.5 text-xs font-medium leading-snug text-zinc-700">{stat.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {runResult && <RunResultPanel result={runResult} />}
+        </>
+      )}
     </div>
   );
 }
@@ -770,12 +888,14 @@ function DomainSection({
   cards,
   displayTimezone,
   onDelete,
+  onUpdate,
   onRunComplete,
 }: {
   domain: string;
   cards: TrackedUrlCard[];
   displayTimezone: string;
   onDelete: (id: string) => void;
+  onUpdate: (updated: TrackedUrlCard) => void;
   onRunComplete: () => void;
 }) {
   return (
@@ -807,6 +927,7 @@ function DomainSection({
             card={card}
             displayTimezone={displayTimezone}
             onDelete={onDelete}
+            onUpdate={onUpdate}
             onRunComplete={onRunComplete}
           />
         ))}
@@ -833,6 +954,11 @@ export default function DashboardContent({
 
   const handleDelete = (id: string) => {
     setCards((prev) => prev.filter((c) => c.id !== id));
+    router.refresh();
+  };
+
+  const handleUpdate = (updated: TrackedUrlCard) => {
+    setCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
     router.refresh();
   };
 
@@ -887,6 +1013,7 @@ export default function DashboardContent({
               cards={domainCards}
               displayTimezone={displayTimezone}
               onDelete={handleDelete}
+              onUpdate={handleUpdate}
               onRunComplete={() => router.refresh()}
             />
           ))}
