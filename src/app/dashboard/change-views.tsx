@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { DiffSegment } from "@/lib/diff-render";
 import { formatShortDate, summaryToBullets } from "@/lib/dashboard-utils";
 
 export type ChangeEntry = {
@@ -12,9 +11,6 @@ export type ChangeEntry = {
   label: string | null;
   summary: string;
   detectedAt: string;
-  segments: DiffSegment[];
-  minorCount: number;
-  oldLength: number;
 };
 
 export type FrequencyRow = {
@@ -30,26 +26,6 @@ function heatColor(n: number): string {
   if (n === 1) return "bg-indigo-200";
   if (n === 2) return "bg-indigo-400";
   return "bg-indigo-600";
-}
-
-function DiffText({ segment }: { segment: DiffSegment }) {
-  return (
-    <p className="text-sm leading-relaxed text-zinc-700">
-      {segment.before && <span className="text-zinc-400">…{segment.before} </span>}
-      {segment.removed && (
-        <span className="rounded bg-red-50 px-1 py-0.5 text-red-700 line-through">
-          {segment.removed}
-        </span>
-      )}
-      {segment.removed && segment.added && " "}
-      {segment.added && (
-        <span className="rounded bg-green-50 px-1 py-0.5 text-green-800">
-          {segment.added}
-        </span>
-      )}
-      {segment.after && <span className="text-zinc-400"> {segment.after}…</span>}
-    </p>
-  );
 }
 
 function FrequencyGrid({
@@ -127,70 +103,9 @@ function FrequencyRowCells({
   );
 }
 
-function DiffList({ changes, timezone }: { changes: ChangeEntry[]; timezone: string }) {
-  if (changes.length === 0) {
-    return (
-      <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center">
-        <p className="text-sm text-zinc-400">No changes detected yet.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {changes.map((change) => (
-        <article key={change.id} className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
-              <h3 className="text-sm font-medium text-zinc-900">
-                {change.label ?? "Untitled"}
-                <span className="ml-1.5 font-normal text-zinc-400">· {change.domain}{change.path}</span>
-              </h3>
-            </div>
-            <time className="shrink-0 text-xs text-zinc-400">
-              {formatShortDate(change.detectedAt, timezone)}
-            </time>
-          </div>
-
-          {change.segments.length > 0 ? (
-            <div className="mt-3 space-y-2.5 border-t border-zinc-100 pt-3">
-              {change.segments.map((segment, i) => (
-                <DiffText key={i} segment={segment} />
-              ))}
-            </div>
-          ) : (
-            <ul className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3">
-              {summaryToBullets(change.summary).map((bullet, i) => (
-                <li key={i} className="flex gap-2 text-sm text-zinc-700">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400" />
-                  <span>{bullet}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <p className="mt-3 text-xs text-zinc-400">
-            {change.segments.length > 0 && (
-              <>
-                {change.segments.length} segment{change.segments.length === 1 ? "" : "s"} ·{" "}
-                {change.oldLength.toLocaleString()} characters scanned
-              </>
-            )}
-            {change.minorCount > 0 && (
-              <span className="text-amber-600">
-                {change.segments.length > 0 ? " · " : ""}
-                {change.minorCount} minor hidden
-              </span>
-            )}
-          </p>
-        </article>
-      ))}
-    </div>
-  );
-}
-
 type TimelineItem = {
   key: string;
+  domain: string;
   summary: string;
   paths: string[];
   detectedAt: string;
@@ -198,15 +113,15 @@ type TimelineItem = {
 
 /**
  * A single site-wide edit (a banner, say) lands as one change row per tracked
- * page. Collapse identical summaries on the same day into one entry listing
- * every page it touched.
+ * page. Collapse identical summaries from the same domain on the same day into
+ * one entry listing every page it touched.
  */
 function toTimeline(changes: ChangeEntry[]): TimelineItem[] {
   const merged = new Map<string, TimelineItem>();
 
   for (const change of changes) {
     const day = change.detectedAt.slice(0, 10);
-    const key = `${day}|${change.summary}`;
+    const key = `${change.domain}|${day}|${change.summary}`;
     const existing = merged.get(key);
 
     if (existing) {
@@ -214,6 +129,7 @@ function toTimeline(changes: ChangeEntry[]): TimelineItem[] {
     } else {
       merged.set(key, {
         key,
+        domain: change.domain,
         summary: change.summary,
         paths: [change.path],
         detectedAt: change.detectedAt,
@@ -224,7 +140,15 @@ function toTimeline(changes: ChangeEntry[]): TimelineItem[] {
   return Array.from(merged.values());
 }
 
-function Timeline({ changes, timezone }: { changes: ChangeEntry[]; timezone: string }) {
+function Timeline({
+  changes,
+  timezone,
+  showDomain,
+}: {
+  changes: ChangeEntry[];
+  timezone: string;
+  showDomain: boolean;
+}) {
   const items = useMemo(() => toTimeline(changes), [changes]);
 
   if (items.length === 0) {
@@ -255,6 +179,8 @@ function Timeline({ changes, timezone }: { changes: ChangeEntry[]; timezone: str
               ))}
             </ul>
             <p className="mt-1.5 text-xs text-zinc-400">
+              {showDomain && <span className="text-zinc-500">{item.domain}</span>}
+              {showDomain && " · "}
               {item.paths.join(", ")} · {formatShortDate(item.detectedAt, timezone)}
               {item.paths.length > 1 && ` · ${item.paths.length} pages, 1 edit`}
             </p>
@@ -278,10 +204,9 @@ export default function ChangeViews({
   domains: string[];
   timezone: string;
 }) {
-  const [showTimeline, setShowTimeline] = useState(false);
   const [domain, setDomain] = useState(ALL);
 
-  const timelineChanges = useMemo(
+  const visible = useMemo(
     () => (domain === ALL ? changes : changes.filter((c) => c.domain === domain)),
     [changes, domain]
   );
@@ -303,54 +228,30 @@ export default function ChangeViews({
       <section className="mt-12">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-zinc-900">
-              {showTimeline ? "Timeline" : "Inline diff"}
-            </h2>
+            <h2 className="text-base font-semibold text-zinc-900">Timeline</h2>
             <p className="mt-0.5 text-sm text-zinc-500">
-              {showTimeline
-                ? "Grouped by competitor, site-wide edits merged"
-                : "Exactly what changed on the page, word by word"}
+              {domain === ALL
+                ? "All competitors, site-wide edits merged"
+                : `${domain} · site-wide edits merged`}
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            {showTimeline && (
-              <select
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-                className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none transition-colors focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-              >
-                <option value={ALL}>All domains</option>
-                {domains.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-            )}
-            <button
-              type="button"
-              onClick={() => setShowTimeline((prev) => !prev)}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
-                showTimeline
-                  ? "border-indigo-200 bg-indigo-50 text-indigo-700"
-                  : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
-              }`}
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 5.25h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5" />
-              </svg>
-              Timeline
-            </button>
-          </div>
+          <select
+            value={domain}
+            onChange={(e) => setDomain(e.target.value)}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none transition-colors focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+          >
+            <option value={ALL}>All domains</option>
+            {domains.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="mt-4">
-          {showTimeline ? (
-            <Timeline changes={timelineChanges} timezone={timezone} />
-          ) : (
-            <DiffList changes={changes} timezone={timezone} />
-          )}
+          <Timeline changes={visible} timezone={timezone} showDomain={domain === ALL} />
         </div>
       </section>
     </>

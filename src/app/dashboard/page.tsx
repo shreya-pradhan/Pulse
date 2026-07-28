@@ -1,7 +1,6 @@
 export const dynamic = "force-dynamic";
 
 import { createServerSupabaseClient } from "@/lib/supabase-server";
-import { buildDiff } from "@/lib/diff-render";
 import { domainOf, pathOf } from "@/lib/dashboard-utils";
 import ChangeViews, {
   type ChangeEntry,
@@ -14,7 +13,6 @@ type ChangeRow = {
   id: string;
   summary: string;
   detected_at: string;
-  diff: string | null;
   tracked_urls:
     | { label: string | null; url: string }
     | { label: string | null; url: string }[]
@@ -38,7 +36,7 @@ export default async function DashboardPage() {
     supabase.from("tracked_urls").select("url"),
     supabase
       .from("changes")
-      .select("id, summary, detected_at, diff, tracked_urls!inner(label, url)")
+      .select("id, summary, detected_at, tracked_urls!inner(label, url)")
       .order("detected_at", { ascending: false }),
   ]);
 
@@ -47,7 +45,6 @@ export default async function DashboardPage() {
       ? row.tracked_urls[0]
       : row.tracked_urls;
     const url = tracked?.url ?? "";
-    const rendered = buildDiff(row.diff);
 
     return {
       id: row.id,
@@ -57,9 +54,6 @@ export default async function DashboardPage() {
       label: tracked?.label ?? null,
       summary: row.summary,
       detectedAt: row.detected_at,
-      segments: rendered?.segments ?? [],
-      minorCount: rendered?.minorCount ?? 0,
-      oldLength: rendered?.oldLength ?? 0,
     };
   });
 
