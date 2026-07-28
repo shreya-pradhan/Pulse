@@ -9,7 +9,8 @@ import {
   type ScheduleType,
 } from "@/lib/schedule";
 import type { SuggestedUrl } from "@/app/api/suggest-urls/route";
-import { deleteTrackedUrl } from "./actions";
+import { domainOf, formatDate, summaryToBullets } from "@/lib/dashboard-utils";
+import { deleteTrackedUrl } from "../actions";
 
 export type TrackedUrlCard = {
   id: string;
@@ -24,44 +25,7 @@ export type TrackedUrlCard = {
   timezone: string;
 };
 
-export type ChangeHistoryItem = {
-  id: string;
-  label: string | null;
-  url: string;
-  summary: string;
-  detectedAt: string;
-};
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatDate(iso: string | null, timeZone?: string): string {
-  if (!iso) return "Never";
-  return new Date(iso).toLocaleString("en-US", {
-    timeZone: timeZone ?? undefined,
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: timeZone ? "short" : undefined,
-  });
-}
-
-function summaryToBullets(summary: string): string[] {
-  return summary
-    .split("\n")
-    .map((line) => line.replace(/^[\s•\-*]+/, "").trim())
-    .filter(Boolean);
-}
-
-/** Extracts a clean domain label from a full URL, e.g. "firecrawl.dev" */
-function domainOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
 
 /** Groups cards by domain, preserving insertion order. */
 function groupByDomain(cards: TrackedUrlCard[]): Map<string, TrackedUrlCard[]> {
@@ -963,12 +927,10 @@ function DomainSection({
 
 // ─── Dashboard root ──────────────────────────────────────────────────────────
 
-export default function DashboardContent({
+export default function TrackedUrlsContent({
   trackedUrls,
-  changeHistory,
 }: {
   trackedUrls: TrackedUrlCard[];
-  changeHistory: ChangeHistoryItem[];
 }) {
   const router = useRouter();
   const displayTimezone = useMemo(() => getBrowserTimezone(), []);
@@ -1044,61 +1006,6 @@ export default function DashboardContent({
           ))}
         </div>
       )}
-
-      {/* Change history */}
-      <section className="mt-14">
-        <div className="flex items-baseline justify-between">
-          <div>
-            <h2 className="text-base font-semibold text-zinc-900">Change history</h2>
-            <p className="mt-0.5 text-sm text-zinc-500">Meaningful changes detected across your tracked pages</p>
-          </div>
-          {changeHistory.length > 0 && (
-            <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
-              {changeHistory.length}
-            </span>
-          )}
-        </div>
-
-        {changeHistory.length === 0 ? (
-          <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-8 text-center">
-            <p className="text-sm text-zinc-400">No changes detected yet.</p>
-          </div>
-        ) : (
-          <div className="mt-4 space-y-3">
-            {changeHistory.map((change) => (
-              <article key={change.id} className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <h3 className="font-medium text-zinc-900">{change.label ?? "Untitled"}</h3>
-                    <a
-                      href={change.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-sm text-zinc-400 hover:text-indigo-600"
-                    >
-                      <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
-                      </svg>
-                      {change.url}
-                    </a>
-                  </div>
-                  <time className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-500">
-                    {formatDate(change.detectedAt, displayTimezone)}
-                  </time>
-                </div>
-                <ul className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3">
-                  {summaryToBullets(change.summary).map((bullet, i) => (
-                    <li key={i} className="flex gap-2 text-sm text-zinc-700">
-                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-400" />
-                      <span>{bullet}</span>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
 
       <AddCompetitorModal
         open={modalOpen}
