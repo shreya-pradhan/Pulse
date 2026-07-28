@@ -191,6 +191,85 @@ function Timeline({
   );
 }
 
+type ReportState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "empty"; message: string }
+  | { status: "ready"; report: string; changeCount: number; period: string }
+  | { status: "error"; message: string };
+
+function ReportPanel({ state }: { state: ReportState }) {
+  if (state.status === "idle") return null;
+
+  if (state.status === "loading") {
+    return (
+      <div className="mt-4 flex items-center gap-2.5 rounded-xl border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
+        <svg className="h-4 w-4 animate-spin text-indigo-500" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+        Analysing recorded changes…
+      </div>
+    );
+  }
+
+  if (state.status === "error") {
+    return (
+      <div className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+        {state.message}
+      </div>
+    );
+  }
+
+  if (state.status === "empty") {
+    return (
+      <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-5 text-sm text-zinc-500">
+        {state.message}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/40 p-5">
+      <div className="flex items-center gap-2">
+        <svg className="h-4 w-4 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+        </svg>
+        <p className="text-sm font-medium text-zinc-900">
+          {state.period === "monthly" ? "Monthly" : "Weekly"} insight
+        </p>
+        <span className="text-xs text-zinc-400">
+          from {state.changeCount} recorded change{state.changeCount === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="mt-3 space-y-2.5">
+        {state.report
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line, i) => {
+            const heading = line.match(
+              /^\*{0,2}(What moved|What it suggests|What to watch)\*{0,2}:?\s*(.*)$/i
+            );
+            const body = (heading ? heading[2] : line).replace(/^[*\-\s]+/, "");
+
+            return (
+              <p key={i} className="text-sm leading-relaxed text-zinc-700">
+                {heading && (
+                  <span className={`font-medium text-zinc-900 ${body ? "" : "block"}`}>
+                    {heading[1]}
+                    {body ? ". " : ""}
+                  </span>
+                )}
+                {body}
+              </p>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
+
 export default function ChangeViews({
   changes,
   days,
@@ -205,6 +284,37 @@ export default function ChangeViews({
   timezone: string;
 }) {
   const [domain, setDomain] = useState(ALL);
+  const [period, setPeriod] = useState<"weekly" | "monthly">("weekly");
+  const [report, setReport] = useState<ReportState>({ status: "idle" });
+
+  const handleGenerate = async () => {
+    setReport({ status: "loading" });
+    try {
+      const res = await fetch("/api/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to generate report");
+
+      if (!data.report) {
+        setReport({ status: "empty", message: data.message });
+      } else {
+        setReport({
+          status: "ready",
+          report: data.report,
+          changeCount: data.changeCount,
+          period: data.period,
+        });
+      }
+    } catch (err) {
+      setReport({
+        status: "error",
+        message: err instanceof Error ? err.message : "Failed to generate report",
+      });
+    }
+  };
 
   const visible = useMemo(
     () => (domain === ALL ? changes : changes.filter((c) => c.domain === domain)),
@@ -214,12 +324,41 @@ export default function ChangeViews({
   return (
     <>
       <section>
-        <h2 className="text-base font-semibold text-zinc-900">Change history</h2>
-        <p className="mt-0.5 text-sm text-zinc-500">
-          {changes.length === 0
-            ? "No changes detected yet"
-            : `${changes.length} change${changes.length === 1 ? "" : "s"} across ${frequency.length} competitor${frequency.length === 1 ? "" : "s"} · last ${days.length} days`}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-900">Change history</h2>
+            <p className="mt-0.5 text-sm text-zinc-500">
+              {changes.length === 0
+                ? "No changes detected yet"
+                : `${changes.length} change${changes.length === 1 ? "" : "s"} across ${frequency.length} competitor${frequency.length === 1 ? "" : "s"} · last ${days.length} days`}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <select
+              value={period}
+              onChange={(e) => setPeriod(e.target.value as "weekly" | "monthly")}
+              className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 outline-none transition-colors focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+            >
+              <option value="weekly">Last 7 days</option>
+              <option value="monthly">Last 30 days</option>
+            </select>
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={report.status === "loading"}
+              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:opacity-60"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+              </svg>
+              Generate report
+            </button>
+          </div>
+        </div>
+
+        <ReportPanel state={report} />
+
         <div className="mt-4">
           <FrequencyGrid days={days} rows={frequency} timezone={timezone} />
         </div>
