@@ -620,19 +620,22 @@ function RunResultPanel({ result }: { result: RunResult }) {
 function TrackedUrlCardItem({
   card,
   displayTimezone,
+  capturingBaseline = false,
   onDelete,
   onUpdate,
   onRunComplete,
 }: {
   card: TrackedUrlCard;
   displayTimezone: string;
+  capturingBaseline?: boolean;
   onDelete: (id: string) => void;
   onUpdate: (updated: TrackedUrlCard) => void;
   onRunComplete: () => void;
 }) {
   const [isDeleting, startDeleteTransition] = useTransition();
-  const [isRunning, setIsRunning] = useState(false);
+  const [isManualRunning, setIsManualRunning] = useState(false);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
+  const isRunning = isManualRunning || capturingBaseline;
 
   const [isEditing, setIsEditing] = useState(false);
   const [editUrl, setEditUrl] = useState(card.url);
@@ -710,7 +713,7 @@ function TrackedUrlCardItem({
   };
 
   const handleRunNow = async () => {
-    setIsRunning(true);
+    setIsManualRunning(true);
     setRunResult(null);
     try {
       const scrapeRes = await fetch("/api/scrape", {
@@ -742,7 +745,7 @@ function TrackedUrlCardItem({
     } catch (err) {
       setRunResult({ status: "error", message: err instanceof Error ? err.message : "Run failed" });
     } finally {
-      setIsRunning(false);
+      setIsManualRunning(false);
     }
   };
 
@@ -784,7 +787,7 @@ function TrackedUrlCardItem({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
               </svg>
             )}
-            {isRunning ? "Running…" : "Run"}
+            {capturingBaseline ? "First scan…" : isRunning ? "Running…" : "Run"}
           </button>
           <button
             onClick={isEditing ? () => setIsEditing(false) : openEdit}
@@ -876,6 +879,7 @@ function DomainSection({
   domain,
   cards,
   displayTimezone,
+  baselineIds,
   onDelete,
   onUpdate,
   onRunComplete,
@@ -883,6 +887,7 @@ function DomainSection({
   domain: string;
   cards: TrackedUrlCard[];
   displayTimezone: string;
+  baselineIds: Set<string>;
   onDelete: (id: string) => void;
   onUpdate: (updated: TrackedUrlCard) => void;
   onRunComplete: () => void;
@@ -915,6 +920,7 @@ function DomainSection({
             key={card.id}
             card={card}
             displayTimezone={displayTimezone}
+            capturingBaseline={baselineIds.has(card.id)}
             onDelete={onDelete}
             onUpdate={onUpdate}
             onRunComplete={onRunComplete}
@@ -936,6 +942,7 @@ export default function TrackedUrlsContent({
   const displayTimezone = useMemo(() => getBrowserTimezone(), []);
   const [modalOpen, setModalOpen] = useState(false);
   const [cards, setCards] = useState(trackedUrls);
+  const [baselineIds, setBaselineIds] = useState<Set<string>>(new Set());
 
   const domainGroups = useMemo(() => groupByDomain(cards), [cards]);
 
@@ -947,6 +954,41 @@ export default function TrackedUrlsContent({
   const handleUpdate = (updated: TrackedUrlCard) => {
     setCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
     router.refresh();
+  };
+
+  /**
+   * Scrape newly tracked pages straight away so they have a baseline snapshot
+   * instead of sitting on "Last checked: Never" until their first scheduled
+   * run, which can be a day out. Failures are deliberately swallowed — the page
+   * is tracked either way, and the next scheduled run will retry.
+   */
+  const captureBaselines = async (newCards: TrackedUrlCard[]) => {
+    setBaselineIds(new Set(newCards.map((c) => c.id)));
+
+    await Promise.allSettled(
+      newCards.map(async (card) => {
+        try {
+          await fetch("/api/scrape", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: card.url, tracked_url_id: card.id }),
+          });
+        } finally {
+          setBaselineIds((prev) => {
+            const next = new Set(prev);
+            next.delete(card.id);
+            return next;
+          });
+        }
+      })
+    );
+
+    router.refresh();
+  };
+
+  const handleSaved = (newCards: TrackedUrlCard[]) => {
+    setCards((prev) => [...newCards, ...prev]);
+    void captureBaselines(newCards);
   };
 
   return (
@@ -999,6 +1041,7 @@ export default function TrackedUrlsContent({
               domain={domain}
               cards={domainCards}
               displayTimezone={displayTimezone}
+              baselineIds={baselineIds}
               onDelete={handleDelete}
               onUpdate={handleUpdate}
               onRunComplete={() => router.refresh()}
@@ -1010,7 +1053,7 @@ export default function TrackedUrlsContent({
       <AddCompetitorModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onSaved={(newCards) => setCards((prev) => [...newCards, ...prev])}
+        onSaved={handleSaved}
       />
     </>
   );
