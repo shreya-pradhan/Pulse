@@ -39,5 +39,21 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  /*
+   * Must run on essentially every request, not just /dashboard. Nothing else
+   * refreshes the session: the dashboard's client components never instantiate
+   * a Supabase browser client, so there is no autoRefreshToken timer running
+   * while a tab sits open. If middleware only covers /dashboard/:path*, an
+   * access token can expire with no navigation to renew it, leaving each
+   * /api/* call to attempt its own refresh — and a rotated refresh token that
+   * fails to persist logs the user out.
+   *
+   * Excluded:
+   * - api/cron: authenticated by CRON_SECRET bearer token, never a cookie
+   *   session, so an auth round-trip per tick is pure overhead
+   * - static assets and images
+   */
+  matcher: [
+    "/((?!api/cron|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)",
+  ],
 };
