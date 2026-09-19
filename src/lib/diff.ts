@@ -1,5 +1,14 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { createTwoFilesPatch } from "diff";
+import { generateWithFallback } from "@/lib/gemini";
+
+/**
+ * A failure here is not recoverable on the next run: the cron path saves the
+ * new snapshot before summarising, so a thrown error advances next_run_at and
+ * the following scan compares against the already-updated content and reports
+ * "unchanged". The change is lost for good, which is why this retries and
+ * falls back rather than failing on a single blip.
+ */
+const SUMMARY_MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest"] as const;
 
 const PROMPT = `You are a product manager reviewing competitor website changes.
 Here is a diff of a competitor page. Summarize ONLY meaningful
@@ -27,11 +36,11 @@ export async function summarizeDiff(diff: string): Promise<string> {
     throw new Error("GEMINI_API_KEY is not configured");
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-flash-lite-latest" });
-
-  const result = await model.generateContent(`${PROMPT}\n\n${diff}`);
-  const summary = result.response.text().trim();
+  const summary = await generateWithFallback(
+    apiKey,
+    SUMMARY_MODELS,
+    `${PROMPT}\n\n${diff}`
+  );
 
   if (summary.toUpperCase().includes("NO_CHANGE")) {
     return "NO_CHANGE";

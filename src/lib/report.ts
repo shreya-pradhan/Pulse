@@ -1,4 +1,12 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { generateWithFallback } from "@/lib/gemini";
+
+/**
+ * Ordered by observed reliability, not capability. gemini-flash-latest is the
+ * stronger synthesiser but has been returning 503 under load — measured 0/5 on
+ * a real ~3.8k-token report payload — so the lite model leads and flash is the
+ * backup. Reorder if flash-latest's capacity recovers.
+ */
+const REPORT_MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest"] as const;
 
 export type ReportPeriod = "weekly" | "monthly";
 
@@ -82,12 +90,9 @@ export async function generateReport(
     throw new Error("GEMINI_API_KEY is not configured");
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
-
-  const result = await model.generateContent(
+  return generateWithFallback(
+    apiKey,
+    REPORT_MODELS,
     buildReportInput(changes, period, start, end)
   );
-
-  return result.response.text().trim();
 }

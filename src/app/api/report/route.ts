@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase-server";
 import { domainOf, pathOf } from "@/lib/dashboard-utils";
+import { isTransientGeminiError } from "@/lib/gemini";
 import {
   generateReport,
   PERIOD_DAYS,
@@ -80,9 +81,17 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[report] Failed to generate:", message);
+
+    // Distinguish "the model is busy, try again" from a real misconfiguration —
+    // the first is worth a retry from the user, the second never will be.
+    const transient = isTransientGeminiError(err);
     return NextResponse.json(
-      { error: "Failed to generate report" },
-      { status: 500 }
+      {
+        error: transient
+          ? "The model is busy right now. Try again in a moment."
+          : "Failed to generate report",
+      },
+      { status: transient ? 503 : 500 }
     );
   }
 }
